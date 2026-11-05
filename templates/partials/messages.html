@@ -1,0 +1,17 @@
+{% for m in messages %}
+<article class="message {{ m.role }}">
+  <div class="role">{{ m.role }}</div>
+  <div class="content">{{ m.content }}</div>
+  {% if m.sources %}
+  <details class="sources">
+    <summary>{{ m.sources|length }} source(s)</summary>
+    <ul>
+      {% for s in m.sources %}
+      <li><b>{{ s.source }}</b>{% if s.score is not none %} <span class="muted">({{ "%.2f"|format(s.score) }})</span>{% endif %}
+        {% if s.snippet %}<div class="snippet">{{ s.snippet }}</div>{% endif %}</li>
+      {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+</article>
+{% endfor %}
