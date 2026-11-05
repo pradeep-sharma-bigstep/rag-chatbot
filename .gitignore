@@ -8,3 +8,4 @@ self_check_report.json
 data/sessions/*.json
 data/vectorstore/*
 !data/vectorstore/.gitkeep
+CLAUDE.md
