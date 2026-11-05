@@ -28,15 +28,25 @@ Rules the evaluator checks (with a scripted fake LLM, so no API key needed):
 
 from __future__ import annotations
 
-from typing import Any, Protocol
+from typing import Annotated, Any, Protocol, TypedDict
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.tools import BaseTool
+from langgraph.graph import END, START, StateGraph
+from langgraph.graph.message import add_messages
 
-from app.models import EngineResult, Message
-from app.vectordb.retriever import Retriever
+from app.chat.llm import get_llm
+from app.models import EngineResult, Message, Source
+from app.tools import get_tools
+from app.vectordb.retriever import Retriever, get_retriever
 
 PLACEHOLDER_ANSWER = "Engine not implemented yet — see app/chat/engine.py"
+
+SYSTEM_PROMPT = (
+    "You are a helpful assistant for the employees of a company. "
+    "Answer clearly and concisely. If you do not know the answer, say so instead of guessing."
+)
 
 
 class ChatEngine(Protocol):
@@ -57,6 +67,71 @@ class PlaceholderEngine:
         return EngineResult(answer=PLACEHOLDER_ANSWER, sources=[])
 
 
+class GraphState(TypedDict):
+    """What flows between the graph's nodes during one chat turn."""
+
+    messages: Annotated[list[BaseMessage], add_messages]  # history + new question + replies
+    context: str  # retrieved document text for the prompt (milestone 7)
+    sources: list[Source]  # retrieved chunks shown under the answer (milestone 7)
+
+
+_ROLE_TO_MESSAGE: dict[str, type[BaseMessage]] = {"user": HumanMessage, "assistant": AIMessage}
+
+
+def to_langchain_messages(history: list[Message]) -> list[BaseMessage]:
+    """Convert stored session messages to LangChain messages, oldest first.
+
+    Stored `system` messages and empty messages are skipped: the engine adds its own
+    system prompt, and providers reject empty turns.
+    """
+    return [
+        _ROLE_TO_MESSAGE[m.role](content=m.content) for m in history if m.role in _ROLE_TO_MESSAGE and m.content.strip()
+    ]
+
+
+class LangGraphEngine:
+    """Chat engine backed by a compiled LangGraph graph: START -> generate -> END."""
+
+    def __init__(self, llm: BaseChatModel, retriever: Retriever | None, tools: list[BaseTool]) -> None:
+        self.llm = llm
+        self.retriever = retriever  # wired into the graph in milestone 7
+        self.tools = tools  # bound to the LLM in milestone 8
+        self.graph = self._build_graph()
+
+    def _build_graph(self) -> Any:
+        builder = StateGraph(GraphState)
+        builder.add_node("generate", self._generate)
+        builder.add_edge(START, "generate")
+        builder.add_edge("generate", END)
+        return builder.compile()
+
+    def _generate(self, state: GraphState) -> dict[str, Any]:
+        prompt = [SystemMessage(content=SYSTEM_PROMPT), *state["messages"]]
+        response = self.llm.invoke(prompt)
+        return {"messages": [response]}
+
+    def invoke(self, message: str, history: list[Message], session_id: str) -> EngineResult:
+        messages = [*to_langchain_messages(history), HumanMessage(content=message)]
+        initial: GraphState = {"messages": messages, "context": "", "sources": []}
+        final_state = self.graph.invoke(initial, config={"metadata": {"session_id": session_id}})
+        answer = final_state["messages"][-1].text
+        return EngineResult(answer=answer, sources=final_state.get("sources", []))
+
+
+def _default_retriever() -> Retriever | None:
+    try:
+        return get_retriever()
+    except NotImplementedError:
+        return None
+
+
+def _default_tools() -> list[BaseTool]:
+    try:
+        return get_tools()
+    except NotImplementedError:
+        return []
+
+
 def get_engine(
     llm: BaseChatModel | None = None,
     retriever: Retriever | None = None,
@@ -70,9 +145,11 @@ def get_engine(
          tools     None -> app.tools.get_tools() (same fallback: no tools)
     OUT: an object with `.graph` and `.invoke(message, history, session_id)`.
 
-    TODO(milestone 1): define the graph state (TypedDict with `messages`, `context`, `sources`),
-                       the `generate` node, compile the graph, wrap it in a class.
     TODO(milestone 7): add the `retrieve` node and fill `sources`.
     TODO(milestone 8): bind tools and add the tool loop.
     """
-    raise NotImplementedError("TODO(milestone 1): implement get_engine in app/chat/engine.py")
+    return LangGraphEngine(
+        llm=llm if llm is not None else get_llm(),
+        retriever=retriever if retriever is not None else _default_retriever(),
+        tools=tools if tools is not None else _default_tools(),
+    )

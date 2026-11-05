@@ -13,6 +13,7 @@ dependencies = [
     "langchain-core>=1.7,<2",
     "langgraph>=1.2,<2",
     "langsmith>=0.14,<0.15",
+    "langchain-groq>=1.1,<2",
 ]
 
 [dependency-groups]
