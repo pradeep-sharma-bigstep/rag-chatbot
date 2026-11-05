@@ -32,6 +32,7 @@ from typing import Annotated, Any, Protocol, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
@@ -47,6 +48,8 @@ SYSTEM_PROMPT = (
     "You are a helpful assistant for the employees of a company. "
     "Answer clearly and concisely. If you do not know the answer, say so instead of guessing."
 )
+
+TRACE_RUN_NAME = "chat_turn"  # name of the top-level run in LangSmith
 
 
 class ChatEngine(Protocol):
@@ -113,7 +116,9 @@ class LangGraphEngine:
     def invoke(self, message: str, history: list[Message], session_id: str) -> EngineResult:
         messages = [*to_langchain_messages(history), HumanMessage(content=message)]
         initial: GraphState = {"messages": messages, "context": "", "sources": []}
-        final_state = self.graph.invoke(initial, config={"metadata": {"session_id": session_id}})
+        # `session_id` metadata lets LangSmith filter traces by chat and group them into threads.
+        config: RunnableConfig = {"run_name": TRACE_RUN_NAME, "metadata": {"session_id": session_id}}
+        final_state = self.graph.invoke(initial, config=config)
         answer = final_state["messages"][-1].text
         return EngineResult(answer=answer, sources=final_state.get("sources", []))
 
