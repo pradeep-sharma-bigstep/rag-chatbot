@@ -14,6 +14,7 @@ dependencies = [
     "langgraph>=1.2,<2",
     "langsmith>=0.14,<0.15",
     "langchain-groq>=1.1,<2",
+    "fastembed>=0.9.1",
 ]
 
 [dependency-groups]
