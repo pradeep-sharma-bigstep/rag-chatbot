@@ -30,10 +30,12 @@ from __future__ import annotations
 
 import logging
 import re
+from collections.abc import Iterator
+from dataclasses import dataclass
 from typing import Annotated, Any, Protocol, TypedDict
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import BaseTool
 from langgraph.errors import GraphRecursionError
@@ -83,6 +85,28 @@ class ChatEngine(Protocol):
         """IN: new user message, earlier messages of this session, session id.
         OUT: EngineResult(answer=..., sources=[...])."""
         ...
+
+
+@dataclass(frozen=True)
+class Token:
+    """A piece of the answer text, in order."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class Restart:
+    """The text streamed so far was only a lead-in to a tool call: clear it, the real answer follows."""
+
+
+@dataclass(frozen=True)
+class Finished:
+    """The last event of a stream: the complete answer and its sources (same as `invoke` returns)."""
+
+    result: EngineResult
+
+
+StreamEvent = Token | Restart | Finished
 
 
 class PlaceholderEngine:
@@ -214,6 +238,46 @@ class LangGraphEngine:
             return EngineResult(answer=TOO_MANY_STEPS_ANSWER, sources=[])
         answer = final_state["messages"][-1].text
         return EngineResult(answer=answer, sources=final_state.get("sources", []))
+
+    def stream(self, message: str, history: list[Message], session_id: str) -> Iterator[StreamEvent]:
+        """Like `invoke`, but yields the answer as it is written: Token events, then one Finished event.
+
+        Runs the same graph, so retrieval, tools and the tool-round cap behave exactly as in `invoke`.
+        """
+        initial: GraphState = {
+            "messages": [*to_langchain_messages(history), HumanMessage(content=message)],
+            "context": "",
+            "sources": [],
+        }
+        config: RunnableConfig = {
+            "run_name": TRACE_RUN_NAME,
+            "metadata": {"session_id": session_id},
+            "recursion_limit": RECURSION_LIMIT,
+        }
+        final_state: dict[str, Any] | None = None
+        streamed = False  # has text been sent since the last Restart?
+        try:
+            for mode, payload in self.graph.stream(initial, config=config, stream_mode=["messages", "values"]):
+                if mode == "values":
+                    final_state = payload
+                    continue
+                chunk, meta = payload
+                if meta.get("langgraph_node") != "generate" or not isinstance(chunk, AIMessage | AIMessageChunk):
+                    continue
+                if chunk.tool_calls or getattr(chunk, "tool_call_chunks", None):
+                    if streamed:
+                        streamed = False
+                        yield Restart()
+                elif chunk.text:
+                    streamed = True
+                    yield Token(chunk.text)
+        except GraphRecursionError:
+            logger.warning("Stopped after %d tool rounds (session %s)", MAX_TOOL_ROUNDS, session_id)
+            yield Finished(EngineResult(answer=TOO_MANY_STEPS_ANSWER, sources=[]))
+            return
+        if final_state is None:
+            raise RuntimeError("the graph produced no result")
+        yield Finished(EngineResult(answer=final_state["messages"][-1].text, sources=final_state.get("sources", [])))
 
 
 def _default_retriever() -> Retriever | None:

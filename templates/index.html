@@ -54,10 +54,7 @@
         {% with messages = current.messages %}{% include "partials/messages.html" %}{% endwith %}
       </div>
 
-      <form class="composer" hx-post="/ui/sessions/{{ current.id }}/messages"
-            hx-target="#messages" hx-swap="beforeend"
-            hx-on::before-request="this.querySelector('button').disabled = true"
-            hx-on::after-request="this.querySelector('button').disabled = false; if(event.detail.successful){ this.reset(); document.getElementById('messages').scrollTop = 1e9 }">
+      <form class="composer" id="composer" data-stream-url="/api/sessions/{{ current.id }}/messages/stream">
         <textarea name="content" rows="2" placeholder="Ask about your documents…" required
                   onkeydown="if(event.key==='Enter' && !event.shiftKey){event.preventDefault(); this.form.requestSubmit()}"></textarea>
         <button class="primary" type="submit">Send</button>
@@ -70,7 +67,5 @@
     {% endif %}
   </main>
 </div>
-<script>
-  const box = document.getElementById('messages'); if (box) box.scrollTop = box.scrollHeight;
-</script>
+<script src="{{ url_for('static', path='chat.js') }}"></script>
 {% endblock %}
