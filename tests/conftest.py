@@ -7,10 +7,26 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from app.config import PROJECT_ROOT, Settings, load_settings
+from app.config import PROJECT_ROOT, Settings, get_settings, load_settings
 from app.main import create_app
 
 SAMPLE_DOCS = PROJECT_ROOT / "data" / "documents"
+
+
+@pytest.fixture(autouse=True)
+def isolated_data_dirs(tmp_path_factory: pytest.TempPathFactory, monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Keep every test away from the real ./data folders.
+
+    `app.deps.build_components` builds the vector store from the global settings, not from the
+    Settings a test passes to `create_app`. Without this, upload tests would index their files
+    (notes.md, escape.md ...) into your real data/vectorstore.
+    """
+    root = tmp_path_factory.mktemp("isolated-data")
+    for name, folder in (("VECTOR_DIR", "vectorstore"), ("SESSIONS_DIR", "sessions"), ("DOCUMENTS_DIR", "documents")):
+        monkeypatch.setenv(name, str(root / folder))
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 @pytest.fixture()
