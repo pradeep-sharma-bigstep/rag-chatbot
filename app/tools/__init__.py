@@ -22,10 +22,12 @@ from __future__ import annotations
 
 from langchain_core.tools import BaseTool
 
+# Note: importing the tool named `calculator` makes `app.tools.calculator` the tool object, not the module.
+# `from app.tools.calculator import calculate` still works; to get the module use importlib.import_module.
+from app.tools.calculator import calculator
+from app.tools.clock import current_datetime
+
 
 def get_tools() -> list[BaseTool]:
-    """OUT: every tool the engine should bind to the LLM.
-
-    TODO(milestone 8): import your tools and return them, e.g. `return [calculator, current_datetime]`.
-    """
-    raise NotImplementedError("TODO(milestone 8): implement get_tools in app/tools/__init__.py")
+    """OUT: every tool the engine should bind to the LLM (a new list on every call)."""
+    return [calculator, current_datetime]
