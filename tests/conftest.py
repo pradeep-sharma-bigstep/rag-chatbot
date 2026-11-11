@@ -24,6 +24,7 @@ def isolated_data_dirs(tmp_path_factory: pytest.TempPathFactory, monkeypatch: py
     root = tmp_path_factory.mktemp("isolated-data")
     for name, folder in (("VECTOR_DIR", "vectorstore"), ("SESSIONS_DIR", "sessions"), ("DOCUMENTS_DIR", "documents")):
         monkeypatch.setenv(name, str(root / folder))
+    monkeypatch.delenv("RETRIEVAL_MIN_SCORE", raising=False)  # an opt-in cut-off in .env must not leak into tests
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
